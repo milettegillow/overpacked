@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/* Evening cabin: dark wood, warm cream, moss and lamplight. */
+:root {
+  --background: #2e2219;
+  --raised: #3d2e22;
+  --foreground: #f1e6d2;
+  --moss: #a9bc8c;
+
+  --primary: #e3a94a;
+  --primary-foreground: #2e2219;
+
+  --glad: #4a5e36;
+  --glad-foreground: #ddebc8;
+  --unneeded: #6e3424;
+  --unneeded-foreground: #f6d3c6;
+  --wished: #7a5a1c;
+  --wished-foreground: #f8e3b0;
+
+  --light-a: #f5c05a;
+  --light-b: #f0d79a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-raised: var(--raised);
+  --color-foreground: var(--foreground);
+  --color-moss: var(--moss);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-glad: var(--glad);
+  --color-glad-foreground: var(--glad-foreground);
+  --color-unneeded: var(--unneeded);
+  --color-unneeded-foreground: var(--unneeded-foreground);
+  --color-wished: var(--wished);
+  --color-wished-foreground: var(--wished-foreground);
+  --color-light-a: var(--light-a);
+  --color-light-b: var(--light-b);
+
+  --font-sans: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-row: 10px;
+  --radius-card: 16px;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.fairy-light {
+  animation: twinkle 3.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fairy-light {
+    animation: none;
+  }
+}
