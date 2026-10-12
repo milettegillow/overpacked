@@ -26,9 +26,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <html lang="en-GB" className={`${bricolage.variable} h-full antialiased`}>
         <body className="flex min-h-full flex-col font-sans">
-          <header className="pt-5 pb-4">
+          <FairyLights />
+          <header className="pb-4">
             <div className="mx-auto flex w-full max-w-[640px] items-center justify-between px-4">
-              <span className="text-xl font-medium tracking-tight">
+              <span className="text-2xl font-medium tracking-tight">
                 overpacked
               </span>
               <Suspense>
@@ -40,9 +41,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                   </SignOutButton>
                 </Show>
               </Suspense>
-            </div>
-            <div className="mt-4 px-4">
-              <FairyLights />
             </div>
           </header>
           <main className="mx-auto w-full max-w-[640px] flex-1 px-4 pb-12">

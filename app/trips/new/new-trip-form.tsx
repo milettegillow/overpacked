@@ -3,9 +3,10 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  couldStartWithinForecastWindow,
   monthOf,
+  needsDatesForForecast,
   nightsBetween,
+  type Timing,
 } from "@/lib/dates";
 import {
   MONTH_NAMES,
@@ -25,6 +26,7 @@ type Fields = {
   start_date: string;
   end_date: string;
   nights: string;
+  timing: Timing;
   climate_summary: string | null;
   climate_band: ClimateBand | null;
 };
@@ -54,8 +56,11 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (typeof data.error === "string") throw new Error(data.error);
     throw new Error(
-      typeof data.error === "string" ? data.error : "Something went wrong. Try again.",
+      process.env.NODE_ENV === "development"
+        ? `Request failed: ${res.status} ${res.statusText}`
+        : "Something went wrong. Try again.",
     );
   }
   return data as T;
@@ -87,6 +92,7 @@ export function NewTripForm() {
         start_date: trip.start_date ?? "",
         end_date: trip.end_date ?? "",
         nights: trip.nights == null ? "" : String(trip.nights),
+        timing: trip.timing,
         climate_summary: trip.climate_summary,
         climate_band: trip.climate_band,
       });
@@ -111,14 +117,9 @@ export function NewTripForm() {
     setFields(next);
   }
 
+  // Only upcoming trips starting soon need exact dates; past trips never do.
   const datesRequired =
-    fields != null &&
-    couldStartWithinForecastWindow(
-      fields.month,
-      fields.start_date || null,
-      localToday(),
-    );
-  const datesMissing = fields != null && (!fields.start_date || !fields.end_date);
+    fields != null && needsDatesForForecast(fields, localToday());
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -130,7 +131,7 @@ export function NewTripForm() {
       setError("Add how many nights you're away.");
       return;
     }
-    if (datesRequired && datesMissing) {
+    if (datesRequired) {
       setError("Add your exact dates for a forecast.");
       return;
     }
@@ -253,7 +254,7 @@ export function NewTripForm() {
             </Field>
           </div>
 
-          {datesRequired && datesMissing && (
+          {datesRequired && (
             <p className="text-wished-foreground">Add your exact dates for a forecast</p>
           )}
 

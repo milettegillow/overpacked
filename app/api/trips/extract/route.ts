@@ -26,6 +26,11 @@ export async function POST(request: Request) {
     if (err instanceof ExtractError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    throw err;
+    console.error("Trip extraction failed", err);
+    const detail =
+      process.env.NODE_ENV === "development" && err instanceof Error
+        ? `Couldn't read your trip: ${err.message}`
+        : "Couldn't read your trip. Try again in a moment.";
+    return NextResponse.json({ error: detail }, { status: 500 });
   }
 }

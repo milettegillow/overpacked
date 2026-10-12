@@ -45,12 +45,22 @@
 
 html {
   color-scheme: dark;
+  background-color: #2a1f17;
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+/* Warm lamplight from the top, fixed so it never repeats on scroll. A fixed
+   layer rather than background-attachment, which mobile Safari ignores. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse at 50% 0%, #4a3524 0%, #2a1f17 75%);
 }
 
 @keyframes twinkle {
@@ -59,16 +69,16 @@ body {
     opacity: 1;
   }
   50% {
-    opacity: 0.55;
+    opacity: 0.75;
   }
 }
 
-.fairy-light {
-  animation: twinkle 3.6s ease-in-out infinite;
+.fairy-bulb {
+  animation: twinkle 4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fairy-light {
+  .fairy-bulb {
     animation: none;
   }
 }

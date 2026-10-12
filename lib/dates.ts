@@ -43,7 +43,8 @@ export function monthOf(iso: string): number {
   return Number(iso.slice(5, 7));
 }
 
-// True if the trip starts between today and FORECAST_WINDOW_DAYS from today.
+// True only if the trip starts between today and FORECAST_WINDOW_DAYS from
+// today. Past trips are never in the window.
 export function isWithinForecastWindow(
   startDate: string | null | undefined,
   today = todayIso(),
@@ -53,15 +54,26 @@ export function isWithinForecastWindow(
   return until >= 0 && until <= FORECAST_WINDOW_DAYS;
 }
 
-// Without a start date, the trip could be soon if its month overlaps the
-// forecast window (e.g. "this month", or next month near the end of this one).
-export function couldStartWithinForecastWindow(
-  month: number | null | undefined,
-  startDate: string | null | undefined,
+export type Timing = "past" | "ongoing" | "upcoming";
+
+// Whether exact dates are needed before saving, so the trip can get a forecast.
+// Only upcoming trips that start within the forecast window need them; past
+// and ongoing trips never do. Without a start date, an upcoming trip counts as
+// soon if its month overlaps the window (e.g. "this month").
+export function needsDatesForForecast(
+  trip: {
+    month: number | null | undefined;
+    start_date: string | null | undefined;
+    end_date: string | null | undefined;
+    timing?: Timing | null;
+  },
   today = todayIso(),
 ): boolean {
-  if (isIsoDate(startDate)) return isWithinForecastWindow(startDate, today);
-  if (month == null) return false;
+  if (isIsoDate(trip.start_date) && isIsoDate(trip.end_date)) return false;
+  if (isIsoDate(trip.start_date)) {
+    return isWithinForecastWindow(trip.start_date, today);
+  }
+  if (trip.timing !== "upcoming" || trip.month == null) return false;
   const windowEnd = addDays(today, FORECAST_WINDOW_DAYS);
-  return monthOf(today) === month || monthOf(windowEnd) === month;
+  return monthOf(today) === trip.month || monthOf(windowEnd) === trip.month;
 }
