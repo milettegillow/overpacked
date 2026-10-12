@@ -28,6 +28,7 @@ type LegFields = {
   location_key: string | null;
   vibe: Vibe;
   month: number;
+  year: number;
   start_date: string;
   end_date: string;
   nights: string;
@@ -59,6 +60,7 @@ function toFields(leg: ExtractedLeg): LegFields {
     location_key: leg.location_key,
     vibe: leg.vibe,
     month: leg.month,
+    year: leg.year,
     start_date: leg.start_date ?? "",
     end_date: leg.end_date ?? "",
     nights: leg.nights == null ? "" : String(leg.nights),
@@ -78,6 +80,7 @@ function blankLegAfter(prev: LegFields): LegFields {
     location_key: null,
     vibe: prev.vibe,
     month: prev.end_date ? monthOf(prev.end_date) : prev.month,
+    year: prev.end_date ? Number(prev.end_date.slice(0, 4)) : prev.year,
     start_date: prev.end_date,
     end_date: "",
     nights: "",
@@ -124,7 +127,10 @@ export function NewTripForm() {
     const next = { ...leg, [field]: value };
     const nights = nightsBetween(next.start_date, next.end_date);
     if (nights != null) next.nights = String(nights);
-    if (next.start_date) next.month = monthOf(next.start_date);
+    if (next.start_date) {
+      next.month = monthOf(next.start_date);
+      next.year = Number(next.start_date.slice(0, 4));
+    }
     updateLeg(leg.key, next);
   }
 

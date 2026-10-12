@@ -18,6 +18,7 @@ const LegSchema = z.object({
   location_key: z.string().max(250).nullable().optional(),
   vibe: z.enum(VIBES),
   month: z.number().int().min(1).max(12),
+  year: z.number().int().min(1900).max(2200).nullable().optional(),
   start_date: isoDate,
   end_date: isoDate,
   nights: z.number().int().min(0).max(365),
@@ -61,6 +62,7 @@ async function prepareLeg(leg: LegInput, today: string) {
     location_key,
     // Month always follows the start date when there is one.
     month: leg.start_date ? monthOf(leg.start_date) : leg.month,
+    year: leg.start_date ? Number(leg.start_date.slice(0, 4)) : (leg.year ?? Number(today.slice(0, 4))),
     climate_summary: weather?.summary ?? leg.climate_summary ?? null,
   };
 }
@@ -106,11 +108,11 @@ export async function POST(request: Request) {
       ...legs.map(
         (leg, position) => sql`
           insert into op_legs (
-            trip_id, position, city, country, country_code, location_key, vibe, month,
+            trip_id, position, city, country, country_code, location_key, vibe, month, year,
             start_date, end_date, nights, climate_summary, climate_band
           ) values (
             ${tripId}, ${position}, ${leg.city}, ${leg.country}, ${leg.country_code},
-            ${leg.location_key}, ${leg.vibe}, ${leg.month}, ${leg.start_date},
+            ${leg.location_key}, ${leg.vibe}, ${leg.month}, ${leg.year}, ${leg.start_date},
             ${leg.end_date}, ${leg.nights}, ${leg.climate_summary}, ${leg.climate_band ?? null}
           )
         `,

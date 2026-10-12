@@ -37,3 +37,12 @@ export function XIcon(props: IconProps) {
     </Svg>
   );
 }
+
+export function PlusIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 5l0 14" />
+      <path d="M5 12l14 0" />
+    </Svg>
+  );
+}

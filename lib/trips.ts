@@ -13,7 +13,7 @@ export function isUuid(value: unknown): value is string {
 // Constant, trusted column list (no user input).
 const LEG_COLUMNS = sql.unsafe(`
   l.id, l.trip_id, l.position, l.city, l.country, l.country_code, l.location_key,
-  l.vibe, l.month, l.start_date, l.end_date, l.nights, l.climate_summary, l.climate_band
+  l.vibe, l.month, l.year, l.start_date, l.end_date, l.nights, l.climate_summary, l.climate_band
 `);
 
 function toLeg(row: Record<string, unknown>): Leg {
@@ -26,6 +26,7 @@ function toLeg(row: Record<string, unknown>): Leg {
     location_key: row.location_key as string | null,
     vibe: row.vibe as string | null,
     month: row.month as number | null,
+    year: row.year as number | null,
     start_date: row.start_date as string | null,
     end_date: row.end_date as string | null,
     nights: row.nights as number | null,
@@ -116,7 +117,7 @@ export async function getTripDetail(
 ): Promise<TripDetail | null> {
   if (!isUuid(tripId)) return null;
   const [trip] = await sql`
-    select id, title from op_trips where id = ${tripId} and user_id = ${userId}
+    select id, title, created_at from op_trips where id = ${tripId} and user_id = ${userId}
   `;
   if (!trip) return null;
 
@@ -134,6 +135,7 @@ export async function getTripDetail(
   return {
     id: trip.id as string,
     title: (trip.title as string | null) ?? "Trip",
+    created_at: new Date(trip.created_at as string).toISOString(),
     legs,
     items,
     other_trips: others.map((o) => ({

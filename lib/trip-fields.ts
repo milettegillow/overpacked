@@ -1,5 +1,7 @@
 // Shared vocabulary for trip details. Safe to import from client components.
 
+import { todayIso } from "./dates";
+
 export const VIBES = [
   "city",
   "cabin",
@@ -95,6 +97,7 @@ export type Leg = {
   location_key: string | null;
   vibe: string | null;
   month: number | null;
+  year: number | null;
   start_date: string | null;
   end_date: string | null;
   nights: number | null;
@@ -122,6 +125,7 @@ export type Item = {
 export type TripDetail = {
   id: string;
   title: string;
+  created_at: string;
   legs: Leg[];
   items: Item[];
   other_trips: { id: string; title: string }[];
@@ -151,7 +155,9 @@ export function tripDateLine(legs: Leg[]): string {
     const [y, m] = first.start_date.split("-").map(Number);
     parts.push(`${MONTH_NAMES[m - 1]} ${y}`);
   } else if (first?.month != null && first.month >= 1 && first.month <= 12) {
-    parts.push(MONTH_NAMES[first.month - 1]);
+    parts.push(
+      first.year ? `${MONTH_NAMES[first.month - 1]} ${first.year}` : MONTH_NAMES[first.month - 1],
+    );
   }
   const known = legs.filter((l) => l.nights != null);
   if (known.length > 0) {
@@ -159,4 +165,23 @@ export function tripDateLine(legs: Leg[]): string {
     parts.push(`${nights} ${nights === 1 ? "night" : "nights"}`);
   }
   return parts.join(" · ");
+}
+
+export type TripMode = "planning" | "review";
+
+// Planning for future trips, review for past and ongoing ones, decided by the
+// first leg: its start date if it has one, otherwise its month and year
+// (falling back to the year the trip was added).
+export function getTripMode(
+  trip: { created_at: string; legs: Pick<Leg, "start_date" | "month" | "year">[] },
+  today: string = todayIso(),
+): TripMode {
+  const first = trip.legs[0];
+  if (!first) return "review";
+  if (first.start_date) return first.start_date > today ? "planning" : "review";
+  if (first.month == null) return "review";
+  const year = first.year ?? Number(trip.created_at.slice(0, 4));
+  const tripMonth = year * 12 + first.month;
+  const thisMonth = Number(today.slice(0, 4)) * 12 + Number(today.slice(5, 7));
+  return tripMonth > thisMonth ? "planning" : "review";
 }

@@ -16,6 +16,7 @@ const LegSchema = z.object({
   location_key: z.string(),
   vibe: z.enum(VIBES),
   month: z.number().int(),
+  year: z.number().int(),
   start_date: z.string().nullable(),
   end_date: z.string().nullable(),
   nights: z.number().int().nullable(),
@@ -37,6 +38,7 @@ export type ExtractedLeg = {
   location_key: string;
   vibe: Vibe;
   month: number;
+  year: number;
   start_date: string | null;
   end_date: string | null;
   nights: number | null;
@@ -71,6 +73,7 @@ FIELDS PER LEG
 - location_key: the city lowercased and hyphenated, then a hyphen and the lowercase country code. E.g. "new-york-us", "cavan-ie", "sao-paulo-br". Strip accents.
 - vibe: the single best fit from city, cabin, beach, ski, hiking, festival, work, wedding.
 - month: the month the leg starts, 1-12. If no time is given at all, use the current month.
+- year: the year the leg starts, e.g. 2027 for "skiing next March", 2024 for "March 2024". Use tense and context like for dates.
 - start_date, end_date: ISO dates (YYYY-MM-DD), only when the text pins down exact days. Past dates are fine.
   - Resolve relative phrases against today's date: "last weekend" is the most recent Saturday to Sunday before today; "next weekend" is the coming one; "9-12 October" is those days.
   - A span without exact days ("last week of October", "a week in June", "March 2024") is not exact: leave both dates null, but still set month (and nights if implied).
@@ -105,6 +108,7 @@ async function finishLeg(
     end_date = null;
   }
   const month = start_date ? monthOf(start_date) : Math.min(12, Math.max(1, leg.month));
+  const year = start_date ? Number(start_date.slice(0, 4)) : leg.year;
   const nights =
     nightsBetween(start_date, end_date) ??
     (leg.nights != null && leg.nights >= 0 ? leg.nights : null);
@@ -130,6 +134,7 @@ async function finishLeg(
     country_code,
     location_key,
     month,
+    year,
     start_date,
     end_date,
     nights,

@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ALL_CATEGORIES } from "@/lib/categories";
-import { clearListText, readListText, requestJson } from "@/lib/client";
+import { clearListText, localToday, readListText, requestJson } from "@/lib/client";
 import {
   flagEmoji,
+  getTripMode,
   tripSummaryLine,
   type Item,
   type ItemStatus,
@@ -13,17 +14,11 @@ import {
   type Suggestion,
   type SuggestionSource,
   type TripDetail,
+  type TripMode,
 } from "@/lib/trip-fields";
-import { CheckIcon, XIcon } from "./ui/icons";
+import { CheckIcon, PlusIcon, XIcon } from "./ui/icons";
 import { LegTag } from "./ui/leg-tag";
 import { inputClass, pillClass } from "./ui/styles";
-
-const NEXT_STATUS: Record<ItemStatus, ItemStatus> = {
-  neutral: "glad",
-  glad: "unneeded",
-  unneeded: "neutral",
-  wished: "wished",
-};
 
 const SOURCE_LABEL: Record<SuggestionSource, string> = {
   own: "Your past trips",
@@ -47,6 +42,7 @@ export function TripModal({
   onDeleted: () => void;
 }) {
   const [trip, setTrip] = useState<TripDetail | null>(null);
+  const [mode, setMode] = useState<TripMode>("review");
   const [items, setItems] = useState<Item[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +55,7 @@ export function TripModal({
       .then((detail) => {
         if (cancelled) return;
         setTrip(detail);
+        setMode(getTripMode(detail, localToday()));
         setItems(detail.items);
       })
       .catch((err: Error) => {
@@ -174,27 +171,28 @@ export function TripModal({
               <EmptyList trip={trip} onAdd={addItems} />
             ) : (
               <>
-                <Suggestions
-                  tripId={tripId}
-                  legs={legs}
-                  items={items}
-                  onAdd={(s, legId) =>
-                    addItems({
-                      mode: "suggestion",
-                      name: s.name,
-                      category: s.category,
-                      canonical_name: s.canonical_name,
-                      leg_id: multi ? legId : null,
-                    })
-                  }
-                />
+                {mode === "planning" && (
+                  <Suggestions
+                    tripId={tripId}
+                    legs={legs}
+                    items={items}
+                    onAdd={(s, legId) =>
+                      addItems({
+                        mode: "suggestion",
+                        name: s.name,
+                        category: s.category,
+                        canonical_name: s.canonical_name,
+                        leg_id: multi ? legId : null,
+                      })
+                    }
+                  />
+                )}
 
                 <PackedList
                   items={packed}
                   legs={legs}
-                  onCycleStatus={(item) =>
-                    patchItem(item.id, { status: NEXT_STATUS[item.status] })
-                  }
+                  mode={mode}
+                  onStatus={(item, status) => patchItem(item.id, { status })}
                   onCycleLeg={cycleLeg}
                   onRemove={removeItem}
                 />
@@ -208,33 +206,40 @@ export function TripModal({
               />
             )}
 
-            <section className="flex flex-col gap-3">
-              <div>
-                <span className="inline-block rounded-full bg-wished px-3 py-1 text-wished-foreground">
-                  Wish I&apos;d brought
-                </span>
-              </div>
-              {wished.length > 0 && (
-                <ul className="flex flex-col gap-2">
-                  {wished.map((item) => (
-                    <li key={item.id} className="flex items-stretch rounded-row bg-raised">
-                      <span className="flex-1 px-4 py-3">
-                        {item.name}
-                        {item.quantity > 1 && <span className="text-moss"> ×{item.quantity}</span>}
-                      </span>
-                      {multi && (
-                        <LegControl item={item} legs={legs} onCycle={() => cycleLeg(item)} />
-                      )}
-                      <RemoveButton name={item.name} onRemove={() => removeItem(item.id)} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <AddInput
-                label="Add something you wished you'd brought"
-                onSubmit={(text) => addItems({ mode: "parse", text, status: "wished" })}
-              />
-            </section>
+            {mode === "review" && (
+              <section className="flex flex-col gap-3">
+                <div>
+                  <span className="inline-block rounded-full bg-wished px-3 py-1 text-wished-foreground">
+                    Wish I&apos;d brought
+                  </span>
+                </div>
+                {wished.length > 0 && (
+                  <ul className="flex flex-col gap-2">
+                    {wished.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-center gap-3 rounded-row bg-raised py-2 pr-2 pl-4"
+                      >
+                        <span className="min-w-0 flex-1 py-1">
+                          {item.name}
+                          {item.quantity > 1 && <span className="text-moss"> ×{item.quantity}</span>}
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          {multi && (
+                            <LegControl item={item} legs={legs} onCycle={() => cycleLeg(item)} />
+                          )}
+                          <RemoveButton name={item.name} onRemove={() => removeItem(item.id)} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <AddInput
+                  label="Add something you wished you'd brought"
+                  onSubmit={(text) => addItems({ mode: "parse", text, status: "wished" })}
+                />
+              </section>
+            )}
 
             {error && (
               <p role="alert" className="text-unneeded-foreground">
@@ -250,13 +255,21 @@ export function TripModal({
   );
 }
 
+// A single leg whose tag would just repeat the title adds nothing.
+function showLegTags(trip: TripDetail): boolean {
+  if (trip.legs.length === 0) return false;
+  if (trip.legs.length > 1) return true;
+  const city = (trip.legs[0].city ?? "").trim().toLowerCase();
+  return city !== trip.title.trim().toLowerCase();
+}
+
 function TripHeader({ trip }: { trip: TripDetail }) {
   return (
     <header className="flex flex-col gap-3 pr-10">
       <h2 id="trip-modal-title" className="text-2xl font-medium tracking-tight">
         {trip.title}
       </h2>
-      {trip.legs.length > 0 && (
+      {showLegTags(trip) && (
         <div className="flex flex-wrap gap-2">
           {trip.legs.map((leg) => (
             <LegTag key={leg.id} leg={leg} />
@@ -345,13 +358,15 @@ function EmptyList({
 function PackedList({
   items,
   legs,
-  onCycleStatus,
+  mode,
+  onStatus,
   onCycleLeg,
   onRemove,
 }: {
   items: Item[];
   legs: Leg[];
-  onCycleStatus: (item: Item) => void;
+  mode: TripMode;
+  onStatus: (item: Item, status: ItemStatus) => void;
   onCycleLeg: (item: Item) => void;
   onRemove: (id: string) => void;
 }) {
@@ -375,20 +390,35 @@ function PackedList({
           <h3 className="text-moss">{category}</h3>
           <ul className="flex flex-col gap-2">
             {group.map((item) => (
-              <li key={item.id} className="flex items-stretch rounded-row bg-raised">
-                <button
-                  type="button"
-                  onClick={() => onCycleStatus(item)}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-row px-4 py-3 text-left"
-                >
-                  <span className="min-w-0">
-                    {item.name}
-                    {item.quantity > 1 && <span className="text-moss"> ×{item.quantity}</span>}
-                  </span>
-                  <StatusPill status={item.status} />
-                </button>
-                {multi && <LegControl item={item} legs={legs} onCycle={() => onCycleLeg(item)} />}
-                <RemoveButton name={item.name} onRemove={() => onRemove(item.id)} />
+              // Controls wrap under the name when the row gets tight.
+              <li
+                key={item.id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-row bg-raised py-2 pr-2 pl-4"
+              >
+                <span className="min-w-[9rem] flex-1 py-1">
+                  {item.name}
+                  {item.quantity > 1 && <span className="text-moss"> ×{item.quantity}</span>}
+                </span>
+                <span className="ml-auto flex items-center gap-1.5">
+                  {multi && <LegControl item={item} legs={legs} onCycle={() => onCycleLeg(item)} />}
+                  {mode === "review" && (
+                    <>
+                      <StatusToggle
+                        status="glad"
+                        active={item.status === "glad"}
+                        onClick={() => onStatus(item, item.status === "glad" ? "neutral" : "glad")}
+                      />
+                      <StatusToggle
+                        status="unneeded"
+                        active={item.status === "unneeded"}
+                        onClick={() =>
+                          onStatus(item, item.status === "unneeded" ? "neutral" : "unneeded")
+                        }
+                      />
+                    </>
+                  )}
+                  <RemoveButton name={item.name} onRemove={() => onRemove(item.id)} />
+                </span>
               </li>
             ))}
           </ul>
@@ -398,24 +428,43 @@ function PackedList({
   );
 }
 
-function StatusPill({ status }: { status: ItemStatus }) {
-  if (status === "glad") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-glad px-2.5 py-0.5 text-glad-foreground">
-        <CheckIcon size={14} />
-        So glad
-      </span>
-    );
-  }
-  if (status === "unneeded") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-unneeded px-2.5 py-0.5 text-unneeded-foreground">
-        <XIcon size={14} />
-        Didn&apos;t need
-      </span>
-    );
-  }
-  return null;
+const TOGGLES = {
+  glad: {
+    label: "So glad",
+    Icon: CheckIcon,
+    on: "border-glad bg-glad text-glad-foreground",
+    off: "border-glad text-glad-foreground",
+  },
+  unneeded: {
+    label: "Didn't need",
+    Icon: XIcon,
+    on: "border-unneeded bg-unneeded text-unneeded-foreground",
+    off: "border-unneeded text-unneeded-foreground",
+  },
+} as const;
+
+// Outlined when off, filled when on. Tapping the active one turns it off.
+function StatusToggle({
+  status,
+  active,
+  onClick,
+}: {
+  status: "glad" | "unneeded";
+  active: boolean;
+  onClick: () => void;
+}) {
+  const t = TOGGLES[status];
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 ${active ? t.on : `bg-transparent ${t.off}`}`}
+    >
+      <t.Icon size={14} />
+      {t.label}
+    </button>
+  );
 }
 
 // Which leg an item belongs to on multi-leg trips: a flag, or empty for all legs.
@@ -435,7 +484,7 @@ function LegControl({
       type="button"
       onClick={onCycle}
       aria-label={leg ? `Leg: ${leg.city ?? "leg"}` : "Leg: all legs"}
-      className="flex w-10 shrink-0 items-center justify-center"
+      className="flex size-8 shrink-0 items-center justify-center rounded-full"
     >
       {leg ? (
         <span aria-hidden="true">{flag || (leg.city ?? "?").charAt(0)}</span>
@@ -452,9 +501,9 @@ function RemoveButton({ name, onRemove }: { name: string; onRemove: () => void }
       type="button"
       onClick={onRemove}
       aria-label={`Remove ${name}`}
-      className="flex w-10 shrink-0 items-center justify-center text-moss hover:text-foreground"
+      className="flex size-8 shrink-0 items-center justify-center rounded-full text-moss hover:text-foreground"
     >
-      <XIcon size={16} />
+      <XIcon size={14} />
     </button>
   );
 }
@@ -582,9 +631,12 @@ function Suggestions({
                         type="button"
                         disabled={adding === `${r.leg_id}:${s.canonical_name}`}
                         onClick={() => add(s, r.leg_id)}
-                        className="flex w-full items-center justify-between gap-3 rounded-row border border-raised px-4 py-3 text-left hover:bg-raised disabled:opacity-60"
+                        className={`${SUGGESTION_ROW} w-full text-left hover:bg-[#6E8A55]/10 disabled:opacity-60`}
                       >
-                        <span>{s.name}</span>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <PlusIcon size={16} className="shrink-0" />
+                          {s.name}
+                        </span>
                         <SourceTag source={s.source} />
                       </button>
                     </li>
@@ -597,10 +649,7 @@ function Suggestions({
                 <h3 className="font-medium">You might not need</h3>
                 <ul className="flex flex-col gap-2">
                   {r.not_needed.map((s) => (
-                    <li
-                      key={s.canonical_name}
-                      className="flex items-center justify-between gap-3 rounded-row border border-raised px-4 py-3"
-                    >
+                    <li key={s.canonical_name} className={SUGGESTION_ROW}>
                       <span>{s.name}</span>
                       <SourceTag source={s.source} />
                     </li>
@@ -615,9 +664,13 @@ function Suggestions({
   );
 }
 
+// Dashed and transparent so suggestions never read as part of the list.
+const SUGGESTION_ROW =
+  "flex items-center justify-between gap-3 rounded-row border-[1.5px] border-dashed border-[#6E8A55] bg-transparent px-4 py-3 text-[#C9D9B3]";
+
 function SourceTag({ source }: { source: SuggestionSource }) {
   return (
-    <span className="shrink-0 rounded-full bg-raised px-2.5 py-0.5 text-foreground">
+    <span className="shrink-0 rounded-full border border-[#6E8A55] px-2.5 py-0.5 text-[#C9D9B3]">
       {SOURCE_LABEL[source]}
     </span>
   );
