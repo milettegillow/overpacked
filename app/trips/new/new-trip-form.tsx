@@ -90,7 +90,17 @@ function blankLegAfter(prev: LegFields): LegFields {
   };
 }
 
+// With Cache Components, Next keeps visited pages mounted (hidden by React's
+// <Activity>), so form state would otherwise survive navigation. Keying on
+// bfcacheId gives every fresh visit (the "New trip" button, any push or
+// replace) a clean form, while browser back/forward still restores an unsaved
+// draft.
 export function NewTripForm() {
+  const { bfcacheId } = useRouter();
+  return <NewTripFormFields key={bfcacheId} />;
+}
+
+function NewTripFormFields() {
   const router = useRouter();
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
@@ -187,6 +197,15 @@ export function NewTripForm() {
       });
       if (listText) stashListText(id, listText);
       router.push(`/?trip=${id}`);
+      // Show the new trip on the home page, and drop the saved draft so the
+      // hidden page holds nothing if it's restored later.
+      router.refresh();
+      setText("");
+      setTitle("");
+      setLegs(null);
+      setListText(null);
+      setError(null);
+      setSaving(false);
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
