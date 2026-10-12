@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { ALL_CATEGORIES } from "@/lib/categories";
 import { clearListText, localToday, readListText, requestJson } from "@/lib/client";
 import {
@@ -16,6 +17,7 @@ import {
   type TripDetail,
   type TripMode,
 } from "@/lib/trip-fields";
+import { TripEditForm } from "./trip-edit-form";
 import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "./ui/icons";
 import { LegTag } from "./ui/leg-tag";
 import { inputClass, pillClass } from "./ui/styles";
@@ -43,6 +45,8 @@ export function TripModal({
 }) {
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [mode, setMode] = useState<TripMode>("review");
+  const [editing, setEditing] = useState(false);
+  const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,20 +169,47 @@ export function TripModal({
         tabIndex={-1}
         className="relative h-full w-full overflow-y-auto overscroll-contain bg-background px-4 py-6 outline-none sm:h-auto sm:max-h-full sm:max-w-[640px] sm:rounded-card sm:px-6"
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute top-4 right-4 rounded-full p-2 text-foreground hover:bg-raised"
-        >
-          <XIcon size={20} />
-        </button>
+        <div className="absolute top-4 right-4 flex items-center gap-1">
+          {trip && !editing && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="rounded-full px-3 py-1.5 text-foreground hover:bg-raised"
+            >
+              Edit trip
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-full p-2 text-foreground hover:bg-raised"
+          >
+            <XIcon size={20} />
+          </button>
+        </div>
 
         {loadError && <p className="pt-8 text-unneeded-foreground">{loadError}</p>}
 
         {trip && (
           <div className="flex flex-col gap-8">
-            <TripHeader trip={trip} />
+            {editing ? (
+              <TripEditForm
+                trip={trip}
+                onCancel={() => setEditing(false)}
+                onSaved={(updated) => {
+                  // Dates may have moved the trip between planning and review;
+                  // removed legs leave their items tagged to all legs.
+                  setTrip(updated);
+                  setItems(updated.items);
+                  setMode(getTripMode(updated, localToday()));
+                  setEditing(false);
+                  router.refresh();
+                }}
+              />
+            ) : (
+              <TripHeader trip={trip} />
+            )}
 
             {items.length === 0 ? (
               <EmptyList trip={trip} onAdd={addItems} />
@@ -387,7 +418,7 @@ function showLegTags(trip: TripDetail): boolean {
 
 function TripHeader({ trip }: { trip: TripDetail }) {
   return (
-    <header className="flex flex-col gap-3 pr-10">
+    <header className="flex flex-col gap-3 pr-32">
       <h2 id="trip-modal-title" className="text-2xl font-medium tracking-tight">
         {trip.title}
       </h2>
@@ -683,14 +714,14 @@ function Suggestions({
   const [results, setResults] = useState<LegSuggestions[]>([]);
   const [adding, setAdding] = useState<string | null>(null);
 
-  // Refresh whenever the list's contents change (debounced).
+  // Refresh whenever the list or the legs change (debounced).
   const signature = useMemo(
     () =>
-      items
-        .map((i) => `${i.id}:${i.status}:${i.leg_id ?? ""}`)
-        .sort()
-        .join("|"),
-    [items],
+      [
+        ...items.map((i) => `${i.id}:${i.status}:${i.leg_id ?? ""}`).sort(),
+        ...legs.map((l) => `${l.id}:${l.location_key}:${l.month}:${l.vibe}:${l.climate_band}`),
+      ].join("|"),
+    [items, legs],
   );
 
   const load = useCallback(
