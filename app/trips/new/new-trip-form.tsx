@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { localToday, requestJson, stashListText } from "@/lib/client";
 import {
   monthOf,
   needsDatesForForecast,
@@ -16,10 +17,14 @@ import {
   type ClimateBand,
   type Vibe,
 } from "@/lib/trip-fields";
+import { LegTag } from "@/app/ui/leg-tag";
+import { inputClass, pillClass } from "@/app/ui/styles";
 
-type Fields = {
+type LegFields = {
+  key: number;
   city: string;
   country: string;
+  country_code: string | null;
   location_key: string | null;
   vibe: Vibe;
   month: number;
@@ -31,45 +36,63 @@ type Fields = {
   climate_band: ClimateBand | null;
 };
 
-type Extracted = Omit<Fields, "start_date" | "end_date" | "nights"> & {
+type ExtractedLeg = Omit<LegFields, "key" | "start_date" | "end_date" | "nights"> & {
   start_date: string | null;
   end_date: string | null;
   nights: number | null;
-  forecast: boolean;
 };
 
-const inputClass =
-  "w-full rounded-row bg-raised px-4 py-3 text-foreground placeholder:text-moss focus:outline-2 focus:outline-primary";
-const pillClass =
-  "rounded-full bg-primary px-6 py-3 font-medium text-primary-foreground disabled:opacity-60";
+type Extraction = {
+  title: string;
+  legs: ExtractedLeg[];
+  list_text: string | null;
+};
 
-// The browser's local date, so relative dates match the user's calendar.
-function localToday(): string {
-  return new Date().toLocaleDateString("en-CA");
+let nextKey = 1;
+
+function toFields(leg: ExtractedLeg): LegFields {
+  return {
+    key: nextKey++,
+    city: leg.city,
+    country: leg.country,
+    country_code: leg.country_code,
+    location_key: leg.location_key,
+    vibe: leg.vibe,
+    month: leg.month,
+    start_date: leg.start_date ?? "",
+    end_date: leg.end_date ?? "",
+    nights: leg.nights == null ? "" : String(leg.nights),
+    timing: leg.timing,
+    climate_summary: leg.climate_summary,
+    climate_band: leg.climate_band,
+  };
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    if (typeof data.error === "string") throw new Error(data.error);
-    throw new Error(
-      process.env.NODE_ENV === "development"
-        ? `Request failed: ${res.status} ${res.statusText}`
-        : "Something went wrong. Try again.",
-    );
-  }
-  return data as T;
+// A new leg picks up where the previous one ends.
+function blankLegAfter(prev: LegFields): LegFields {
+  return {
+    key: nextKey++,
+    city: "",
+    country: "",
+    country_code: null,
+    location_key: null,
+    vibe: prev.vibe,
+    month: prev.end_date ? monthOf(prev.end_date) : prev.month,
+    start_date: prev.end_date,
+    end_date: "",
+    nights: "",
+    timing: prev.timing,
+    climate_summary: null,
+    climate_band: null,
+  };
 }
 
 export function NewTripForm() {
   const router = useRouter();
   const [text, setText] = useState("");
-  const [fields, setFields] = useState<Fields | null>(null);
+  const [title, setTitle] = useState("");
+  const [legs, setLegs] = useState<LegFields[] | null>(null);
+  const [listText, setListText] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,23 +102,12 @@ export function NewTripForm() {
     setError(null);
     setExtracting(true);
     try {
-      const trip = await postJson<Extracted>("/api/trips/extract", {
-        text,
-        today: localToday(),
+      const result = await requestJson<Extraction>("/api/trips/extract", {
+        body: { text, today: localToday() },
       });
-      setFields({
-        city: trip.city,
-        country: trip.country,
-        location_key: trip.location_key,
-        vibe: trip.vibe,
-        month: trip.month,
-        start_date: trip.start_date ?? "",
-        end_date: trip.end_date ?? "",
-        nights: trip.nights == null ? "" : String(trip.nights),
-        timing: trip.timing,
-        climate_summary: trip.climate_summary,
-        climate_band: trip.climate_band,
-      });
+      setTitle(result.title);
+      setLegs(result.legs.map(toFields));
+      setListText(result.list_text);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -103,59 +115,79 @@ export function NewTripForm() {
     }
   }
 
-  function update(patch: Partial<Fields>) {
-    setFields((f) => (f ? { ...f, ...patch } : f));
+  function updateLeg(key: number, patch: Partial<LegFields>) {
+    setLegs((ls) => ls?.map((l) => (l.key === key ? { ...l, ...patch } : l)) ?? ls);
   }
 
   // Dates drive the month and the number of nights.
-  function updateDate(key: "start_date" | "end_date", value: string) {
-    if (!fields) return;
-    const next = { ...fields, [key]: value };
+  function updateDate(leg: LegFields, field: "start_date" | "end_date", value: string) {
+    const next = { ...leg, [field]: value };
     const nights = nightsBetween(next.start_date, next.end_date);
     if (nights != null) next.nights = String(nights);
     if (next.start_date) next.month = monthOf(next.start_date);
-    setFields(next);
+    updateLeg(leg.key, next);
   }
 
-  // Only upcoming trips starting soon need exact dates; past trips never do.
-  const datesRequired =
-    fields != null && needsDatesForForecast(fields, localToday());
+  function addLeg() {
+    setLegs((ls) => (ls && ls.length > 0 ? [...ls, blankLegAfter(ls[ls.length - 1])] : ls));
+  }
+
+  function removeLeg(key: number) {
+    setLegs((ls) => (ls && ls.length > 1 ? ls.filter((l) => l.key !== key) : ls));
+  }
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    if (!fields) return;
+    if (!legs) return;
     setError(null);
+    const today = localToday();
 
-    const nights = Number(fields.nights);
-    if (fields.nights.trim() === "" || !Number.isInteger(nights) || nights < 0) {
-      setError("Add how many nights you're away.");
-      return;
-    }
-    if (datesRequired) {
-      setError("Add your exact dates for a forecast.");
-      return;
-    }
-    if (fields.start_date && fields.end_date && fields.end_date < fields.start_date) {
-      setError("The end date is before the start date.");
-      return;
+    for (const leg of legs) {
+      const name = leg.city || "each leg";
+      const nights = Number(leg.nights);
+      if (leg.nights.trim() === "" || !Number.isInteger(nights) || nights < 0) {
+        setError(`Add how many nights you're in ${name}.`);
+        return;
+      }
+      if (needsDatesForForecast(leg, today)) {
+        setError(
+          legs.length > 1
+            ? `Add your exact dates for ${name} for a forecast.`
+            : "Add your exact dates for a forecast.",
+        );
+        return;
+      }
+      if (leg.start_date && leg.end_date && leg.end_date < leg.start_date) {
+        setError(`The end date for ${name} is before the start date.`);
+        return;
+      }
     }
 
     setSaving(true);
     try {
-      const { id } = await postJson<{ id: string }>("/api/trips", {
-        ...fields,
-        raw_input: text,
-        start_date: fields.start_date || null,
-        end_date: fields.end_date || null,
-        nights,
-        today: localToday(),
+      const { id } = await requestJson<{ id: string }>("/api/trips", {
+        body: {
+          title,
+          raw_input: text,
+          legs: legs.map((leg) => ({
+            ...leg,
+            key: undefined,
+            start_date: leg.start_date || null,
+            end_date: leg.end_date || null,
+            nights: Number(leg.nights),
+          })),
+          today,
+        },
       });
-      router.push(`/trips/${id}`);
+      if (listText) stashListText(id, listText);
+      router.push(`/?trip=${id}`);
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
     }
   }
+
+  const multi = (legs?.length ?? 0) > 1;
 
   return (
     <div className="flex flex-col gap-8">
@@ -176,95 +208,33 @@ export function NewTripForm() {
         </div>
       </form>
 
-      {fields && (
-        <form onSubmit={handleSave} className="flex flex-col gap-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="City">
-              <input
-                value={fields.city}
-                onChange={(e) => update({ city: e.target.value })}
-                required
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Country">
-              <input
-                value={fields.country}
-                onChange={(e) => update({ country: e.target.value })}
-                required
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Vibe">
-              <select
-                value={fields.vibe}
-                onChange={(e) => update({ vibe: e.target.value as Vibe })}
-                className={inputClass}
-              >
-                {VIBES.map((v) => (
-                  <option key={v} value={v}>
-                    {sentenceCase(v)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Month">
-              <select
-                value={fields.month}
-                onChange={(e) => update({ month: Number(e.target.value) })}
-                className={inputClass}
-              >
-                {MONTH_NAMES.map((name, i) => (
-                  <option key={name} value={i + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Start date">
-              <input
-                type="date"
-                value={fields.start_date}
-                onChange={(e) => updateDate("start_date", e.target.value)}
-                required={datesRequired}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="End date">
-              <input
-                type="date"
-                value={fields.end_date}
-                min={fields.start_date || undefined}
-                onChange={(e) => updateDate("end_date", e.target.value)}
-                required={datesRequired}
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Nights">
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={fields.nights}
-                onChange={(e) => update({ nights: e.target.value })}
-                required
-                className={inputClass}
-              />
-            </Field>
+      {legs && (
+        <form onSubmit={handleSave} className="flex flex-col gap-6">
+          <Field label="Title">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+              className={inputClass}
+            />
+          </Field>
+
+          {legs.map((leg) => (
+            <LegBlock
+              key={leg.key}
+              leg={leg}
+              multi={multi}
+              onChange={(patch) => updateLeg(leg.key, patch)}
+              onDate={(field, value) => updateDate(leg, field, value)}
+              onRemove={() => removeLeg(leg.key)}
+            />
+          ))}
+
+          <div>
+            <button type="button" onClick={addLeg} className="text-primary">
+              Add leg
+            </button>
           </div>
-
-          {datesRequired && (
-            <p className="text-wished-foreground">Add your exact dates for a forecast</p>
-          )}
-
-          <p className="text-moss">
-            {tripSummaryLine({
-              month: fields.month,
-              nights: fields.nights === "" ? null : Number(fields.nights),
-              climate_summary: fields.climate_summary,
-            })}
-          </p>
 
           <div>
             <button type="submit" disabled={saving} className={pillClass}>
@@ -280,6 +250,125 @@ export function NewTripForm() {
         </p>
       )}
     </div>
+  );
+}
+
+function LegBlock({
+  leg,
+  multi,
+  onChange,
+  onDate,
+  onRemove,
+}: {
+  leg: LegFields;
+  multi: boolean;
+  onChange: (patch: Partial<LegFields>) => void;
+  onDate: (field: "start_date" | "end_date", value: string) => void;
+  onRemove: () => void;
+}) {
+  // Only upcoming legs starting soon need exact dates; past ones never do.
+  // Only rendered after extraction, in the browser.
+  const datesRequired = needsDatesForForecast(leg, localToday());
+
+  return (
+    <section className="flex flex-col gap-5">
+      {multi && (
+        <div className="flex items-center justify-between gap-3">
+          <LegTag leg={leg} />
+          <button type="button" onClick={onRemove} className="text-foreground">
+            Remove
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="City">
+          <input
+            value={leg.city}
+            onChange={(e) => onChange({ city: e.target.value })}
+            required
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Country">
+          <input
+            value={leg.country}
+            onChange={(e) => onChange({ country: e.target.value, country_code: null })}
+            required
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Vibe">
+          <select
+            value={leg.vibe}
+            onChange={(e) => onChange({ vibe: e.target.value as Vibe })}
+            className={inputClass}
+          >
+            {VIBES.map((v) => (
+              <option key={v} value={v}>
+                {sentenceCase(v)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Month">
+          <select
+            value={leg.month}
+            onChange={(e) => onChange({ month: Number(e.target.value) })}
+            className={inputClass}
+          >
+            {MONTH_NAMES.map((name, i) => (
+              <option key={name} value={i + 1}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Start date">
+          <input
+            type="date"
+            value={leg.start_date}
+            onChange={(e) => onDate("start_date", e.target.value)}
+            required={datesRequired}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="End date">
+          <input
+            type="date"
+            value={leg.end_date}
+            min={leg.start_date || undefined}
+            onChange={(e) => onDate("end_date", e.target.value)}
+            required={datesRequired}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Nights">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={leg.nights}
+            onChange={(e) => onChange({ nights: e.target.value })}
+            required
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      {datesRequired && (
+        <p className="text-wished-foreground">Add your exact dates for a forecast</p>
+      )}
+
+      <p className="text-moss">
+        {tripSummaryLine({
+          month: leg.month,
+          nights: leg.nights === "" ? null : Number(leg.nights),
+          climate_summary: leg.climate_summary,
+        })}
+      </p>
+    </section>
   );
 }
 

@@ -1,5 +1,6 @@
 -- overpacked schema. Safe to re-run. Every table is prefixed op_.
 -- Ownership is enforced in server code by filtering on the Clerk user id.
+-- Base tables only: db/migrations/ runs after this and reshapes them.
 
 create table if not exists op_trips (
   id uuid primary key default gen_random_uuid(),
@@ -30,5 +31,4 @@ create table if not exists op_items (
 );
 
 create index if not exists op_trips_user_id_idx on op_trips (user_id);
-create index if not exists op_trips_location_month_idx on op_trips (location_key, month);
 create index if not exists op_items_trip_id_idx on op_items (trip_id);

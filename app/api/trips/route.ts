@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
@@ -6,109 +7,118 @@ import { isIsoDate, monthOf, needsDatesForForecast, todayIso } from "@/lib/dates
 import { slugify } from "@/lib/text";
 import { CLIMATE_BANDS, VIBES } from "@/lib/trip-fields";
 import { geocode, tripWeather, type Place } from "@/lib/weather";
+import { errorResponse, fail } from "@/lib/http";
 
 const isoDate = z.string().refine(isIsoDate).nullable();
 
-const SaveTripSchema = z.object({
-  raw_input: z.string().max(5000),
+const LegSchema = z.object({
   city: z.string().trim().min(1).max(200),
   country: z.string().trim().min(1).max(200),
-  location_key: z.string().max(250).nullable(),
+  country_code: z.string().regex(/^[a-z]{2}$/i).nullable().optional(),
+  location_key: z.string().max(250).nullable().optional(),
   vibe: z.enum(VIBES),
   month: z.number().int().min(1).max(12),
   start_date: isoDate,
   end_date: isoDate,
   nights: z.number().int().min(0).max(365),
   timing: z.enum(["past", "ongoing", "upcoming"]).nullable().optional(),
-  climate_summary: z.string().max(200).nullable(),
-  climate_band: z.enum(CLIMATE_BANDS).nullable(),
+  climate_summary: z.string().max(200).nullable().optional(),
+  climate_band: z.enum(CLIMATE_BANDS).nullable().optional(),
+});
+
+const SaveTripSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  raw_input: z.string().max(20000),
+  legs: z.array(LegSchema).min(1).max(20),
   today: z.string().refine(isIsoDate).optional(),
 });
 
-function fail(error: string, status: number) {
-  return NextResponse.json({ error }, { status });
+type LegInput = z.infer<typeof LegSchema>;
+
+// Geocode afresh (city or country may have been edited) for the country code
+// and location key, then look the weather up for the confirmed dates. Weather
+// never blocks saving: any failure keeps Claude's climate summary.
+async function prepareLeg(leg: LegInput, today: string) {
+  let place: Place | null = null;
+  try {
+    place = await geocode(leg.city, leg.country);
+  } catch (err) {
+    console.error("Geocoding failed", { city: leg.city, country: leg.country }, err);
+  }
+  const country_code =
+    place?.countryCode?.toUpperCase() ?? leg.country_code?.toUpperCase() ?? null;
+  const location_key = country_code
+    ? `${slugify(leg.city)}-${country_code.toLowerCase()}`
+    : (leg.location_key ?? null);
+
+  const weather = place
+    ? await tripWeather(leg.city, leg.country, leg.start_date, leg.end_date, today, place)
+    : null;
+
+  return {
+    ...leg,
+    country_code,
+    location_key,
+    // Month always follows the start date when there is one.
+    month: leg.start_date ? monthOf(leg.start_date) : leg.month,
+    climate_summary: weather?.summary ?? leg.climate_summary ?? null,
+  };
 }
 
 export async function POST(request: Request) {
   try {
-    return await saveTrip(request);
+    const { userId } = await auth();
+    if (!userId) return fail("Log in first.", 401);
+
+    const body = await request.json().catch(() => null);
+    const result = SaveTripSchema.safeParse(body);
+    if (!result.success) {
+      console.error("Invalid trip", result.error.issues);
+      return fail(
+        process.env.NODE_ENV === "development"
+          ? `Some details don't look right: ${result.error.issues
+              .map((i) => `${i.path.join(".")} - ${i.message}`)
+              .join("; ")}`
+          : "Some details are missing or don't look right.",
+        400,
+      );
+    }
+    const trip = result.data;
+    const today = trip.today ?? todayIso();
+
+    for (const leg of trip.legs) {
+      if (leg.start_date && leg.end_date && leg.end_date < leg.start_date) {
+        return fail(`The end date for ${leg.city} is before the start date.`, 400);
+      }
+      if (needsDatesForForecast(leg, today)) {
+        return fail(`Add your exact dates for ${leg.city} for a forecast.`, 400);
+      }
+    }
+
+    const legs = await Promise.all(trip.legs.map((leg) => prepareLeg(leg, today)));
+    const tripId = randomUUID();
+
+    await sql.transaction([
+      sql`
+        insert into op_trips (id, user_id, title, raw_input)
+        values (${tripId}, ${userId}, ${trip.title}, ${trip.raw_input})
+      `,
+      ...legs.map(
+        (leg, position) => sql`
+          insert into op_legs (
+            trip_id, position, city, country, country_code, location_key, vibe, month,
+            start_date, end_date, nights, climate_summary, climate_band
+          ) values (
+            ${tripId}, ${position}, ${leg.city}, ${leg.country}, ${leg.country_code},
+            ${leg.location_key}, ${leg.vibe}, ${leg.month}, ${leg.start_date},
+            ${leg.end_date}, ${leg.nights}, ${leg.climate_summary}, ${leg.climate_band ?? null}
+          )
+        `,
+      ),
+    ]);
+
+    return NextResponse.json({ id: tripId }, { status: 201 });
   } catch (err) {
-    console.error("Saving trip failed", err);
-    // In development, show the real cause on the page.
-    const detail =
-      process.env.NODE_ENV === "development" && err instanceof Error
-        ? `Couldn't save your trip: ${err.message}`
-        : "Couldn't save your trip. Try again in a moment.";
-    return fail(detail, 500);
+    return errorResponse("Couldn't save your trip", err);
   }
-}
-
-async function saveTrip(request: Request) {
-  const { userId } = await auth();
-  if (!userId) return fail("Log in first.", 401);
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return fail("Couldn't read the request.", 400);
-  }
-
-  const result = SaveTripSchema.safeParse(body);
-  if (!result.success) {
-    console.error("Invalid trip", result.error.issues);
-    const detail =
-      process.env.NODE_ENV === "development"
-        ? `Some details don't look right: ${result.error.issues
-            .map((i) => `${i.path.join(".")} - ${i.message}`)
-            .join("; ")}`
-        : "Some details are missing or don't look right.";
-    return fail(detail, 400);
-  }
-  const trip = result.data;
-  const today = trip.today ?? todayIso();
-
-  if (trip.start_date && trip.end_date && trip.end_date < trip.start_date) {
-    return fail("The end date is before the start date.", 400);
-  }
-  if (needsDatesForForecast(trip, today)) {
-    return fail("Add your exact dates for a forecast.", 400);
-  }
-
-  // Month always follows the start date when there is one.
-  const month = trip.start_date ? monthOf(trip.start_date) : trip.month;
-
-  // City or country may have been edited, so geocode afresh: the country code
-  // rebuilds the location key (falling back to the extracted one). Weather is
-  // never allowed to block saving.
-  let place: Place | null = null;
-  try {
-    place = await geocode(trip.city, trip.country);
-  } catch (err) {
-    console.error("Geocoding failed", { city: trip.city, country: trip.country }, err);
-  }
-  const location_key = place?.countryCode
-    ? `${slugify(trip.city)}-${place.countryCode}`
-    : trip.location_key;
-
-  // Dates may have changed since extraction, so look the weather up again:
-  // a forecast for soon trips, recorded weather for past ones.
-  const weather = place
-    ? await tripWeather(trip.city, trip.country, trip.start_date, trip.end_date, today, place)
-    : null;
-  const climate_summary = weather?.summary ?? trip.climate_summary;
-
-  const rows = await sql`
-    insert into op_trips (
-      user_id, raw_input, city, country, location_key, vibe, month,
-      start_date, end_date, nights, climate_summary, climate_band
-    ) values (
-      ${userId}, ${trip.raw_input}, ${trip.city}, ${trip.country}, ${location_key},
-      ${trip.vibe}, ${month}, ${trip.start_date}, ${trip.end_date},
-      ${trip.nights}, ${climate_summary}, ${trip.climate_band}
-    )
-    returning id
-  `;
-
-  return NextResponse.json({ id: rows[0].id as string }, { status: 201 });
 }

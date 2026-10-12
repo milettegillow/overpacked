@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
 import { Bricolage_Grotesque } from "next/font/google";
 import { ClerkProvider, Show, SignOutButton } from "@clerk/nextjs";
@@ -27,11 +28,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <html lang="en-GB" className={`${bricolage.variable} h-full antialiased`}>
         <body className="flex min-h-full flex-col font-sans">
           <FairyLights />
-          <header className="pb-4">
+          <header className="pt-5 pb-4">
             <div className="mx-auto flex w-full max-w-[640px] items-center justify-between px-4">
-              <span className="text-2xl font-medium tracking-tight">
+              <Link href="/" className="text-2xl font-medium tracking-tight">
                 overpacked
-              </span>
+              </Link>
               <Suspense>
                 <Show when="signed-in">
                   <SignOutButton>
