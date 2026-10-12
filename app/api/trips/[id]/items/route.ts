@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ALL_CATEGORIES } from "@/lib/categories";
 import { sql } from "@/lib/db";
 import { errorResponse, fail } from "@/lib/http";
+import { ITEM_RETURNING, insertItems } from "@/lib/items";
 import {
   normaliseCanonical,
   parsePackingList,
@@ -11,7 +12,6 @@ import {
   resolveParsedItem,
   type ResolvedItem,
 } from "@/lib/parse";
-import type { Item } from "@/lib/trip-fields";
 import { getLegsForTrip, isUuid, ownsTrip } from "@/lib/trips";
 
 const legId = z.string().uuid().nullable().optional();
@@ -38,30 +38,6 @@ const AddSchema = z.discriminatedUnion("mode", [
     from: z.string().uuid(),
   }),
 ]);
-
-const RETURNING = sql.unsafe(
-  "returning id, leg_id, name, category, quantity, status, canonical_name",
-);
-
-async function insertItems(
-  tripId: string,
-  userId: string,
-  items: ResolvedItem[],
-  status: "neutral" | "wished",
-  legId: string | null,
-): Promise<Item[]> {
-  if (items.length === 0) return [];
-  const rows = items.map((i) => ({ ...i, status, leg_id: legId }));
-  return (await sql`
-    insert into op_items (trip_id, leg_id, name, category, quantity, status, canonical_name)
-    select ${tripId}, x.leg_id, x.name, x.category, x.quantity, x.status, x.canonical_name
-    from json_to_recordset(${JSON.stringify(rows)}::json) as x(
-      leg_id uuid, name text, category text, quantity int, status text, canonical_name text
-    )
-    where exists (select 1 from op_trips t where t.id = ${tripId} and t.user_id = ${userId})
-    ${RETURNING}
-  `) as Item[];
-}
 
 export async function POST(request: Request, ctx: RouteContext<"/api/trips/[id]/items">) {
   try {
@@ -92,7 +68,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/trips/[id]/
         where i.trip_id = ${body.from} and src.user_id = ${userId}
           and i.status <> 'unneeded'
           and exists (select 1 from op_trips d where d.id = ${tripId} and d.user_id = ${userId})
-        ${RETURNING}
+        ${ITEM_RETURNING}
       `;
       return NextResponse.json({ items }, { status: 201 });
     }
@@ -107,10 +83,10 @@ export async function POST(request: Request, ctx: RouteContext<"/api/trips/[id]/
             category: body.category,
             quantity: 1,
             canonical_name: normaliseCanonical(body.canonical_name),
+            leg_id: leg,
           },
         ],
         "neutral",
-        leg,
       );
       return NextResponse.json({ items }, { status: 201 });
     }
@@ -126,7 +102,12 @@ export async function POST(request: Request, ctx: RouteContext<"/api/trips/[id]/
     }
     if (resolved.length === 0) return fail("We couldn't find any items in that.", 400);
 
-    const items = await insertItems(tripId, userId, resolved, body.status ?? "neutral", leg);
+    const items = await insertItems(
+      tripId,
+      userId,
+      resolved.map((i) => ({ ...i, leg_id: leg })),
+      body.status ?? "neutral",
+    );
     return NextResponse.json({ items }, { status: 201 });
   } catch (err) {
     return errorResponse("Couldn't add that", err);

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { localToday, requestJson, stashListText } from "@/lib/client";
+import { AutoGrowTextarea } from "@/app/ui/auto-grow-textarea";
 import { inputClass, pillClass } from "@/app/ui/styles";
 import {
   TripFields,
@@ -37,6 +38,8 @@ function NewTripFormFields() {
   const [listText, setListText] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Guards against a second submit before the disabled button re-renders.
+  const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleNext(e: FormEvent) {
@@ -60,7 +63,7 @@ function NewTripFormFields() {
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     const legs = list.legs;
-    if (!legs) return;
+    if (!legs || savingRef.current) return;
     setError(null);
     const today = localToday();
 
@@ -70,12 +73,16 @@ function NewTripFormFields() {
       return;
     }
 
+    savingRef.current = true;
     setSaving(true);
     try {
-      const { id } = await requestJson<{ id: string }>("/api/trips", {
-        body: { title, raw_input: text, legs: legs.map(legPayload), today },
-      });
-      if (listText) stashListText(id, listText);
+      // The server parses list_text into items; parsing a long list can take
+      // a few seconds. If it fails, the list waits in the trip modal instead.
+      const { id, list_saved } = await requestJson<{ id: string; list_saved: boolean }>(
+        "/api/trips",
+        { body: { title, raw_input: text, list_text: listText, legs: legs.map(legPayload), today } },
+      );
+      if (listText && !list_saved) stashListText(id, listText);
       router.push(`/?trip=${id}`);
       // Show the new trip on the home page, and drop the saved draft so the
       // hidden page holds nothing if it's restored later.
@@ -89,20 +96,22 @@ function NewTripFormFields() {
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
+    } finally {
+      savingRef.current = false;
     }
   }
 
   return (
     <div className="flex flex-col gap-8">
       <form onSubmit={handleNext} className="flex flex-col gap-4">
-        <textarea
+        <AutoGrowTextarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Cabin in Cavan, last week of October"
+          placeholder="Paste your trip details and packing list"
           aria-label="Your trip"
-          rows={3}
+          rows={10}
           required
-          className={`${inputClass} resize-y`}
+          className={`${inputClass} resize-none overflow-hidden`}
         />
         <div>
           <button type="submit" disabled={extracting || !text.trim()} className={pillClass}>

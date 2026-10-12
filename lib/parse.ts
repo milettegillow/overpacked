@@ -33,6 +33,7 @@ export type ParsedItem = {
   clarifyOptions: ClarifyOption[] | null;
   assumption: string | null;
   canonical_name: string | null;
+  leg?: number | null;
 };
 
 // Built from the taxonomy so the model can only choose categories that exist.
@@ -51,6 +52,8 @@ CATEGORY NOTES
 
 SPLITTING
 - Split the raw text into discrete items. Handle ANY format: bullet points, dashes, checkboxes ("- [ ]", "☐", "✓", "[x]"), commas, the word "and", numbered lists, line breaks, or a mix of these. One logical item per entry.
+- Checkbox marks ("- [ ]", "- [x]", "[x]", "☐", "☑", "✓", "✔") are just notes-app formatting. Strip them and ignore them completely: a ticked box does not mean packed, used or anything else.
+- Headings and group labels (e.g. "Costa Rica:", "Toiletries", "## Clothes") are not items.
 - "+" joining two DISTINCT things means two items: split them. E.g. "Scarf + gloves" -> two items ("scarf", "gloves"); "Toothbrush + toothpaste" -> two items. But "+" that is part of ONE logical item stays as one: "Laptop + charger", "Phone + charger" -> a single item (keep the "+ charger").
 
 MESSY REAL-WORLD ITEMS (never break the JSON over these)
@@ -97,11 +100,16 @@ OUTPUT: STRICT JSON ONLY. Output a single JSON array and nothing else: no markdo
   "clarifyQuestion": string | null,
   "clarifyOptions": [{ "label": string, "category": string, "isClothing": boolean }] | null,
   "assumption": string | null,
-  "canonical_name": string
+  "canonical_name": string,
+  "leg": number | null
 }
 - "raw" is the original text fragment the item came from.
 - For non-ambiguous items: ambiguous=false, clarifyQuestion=null, clarifyOptions=null.
-- For ambiguous items: category=null, quantity=null, ambiguous=true, with clarifyQuestion and clarifyOptions populated.`;
+- For ambiguous items: category=null, quantity=null, ambiguous=true, with clarifyQuestion and clarifyOptions populated.
+
+LEGS
+- If the message starts with a LEGS block listing the trip's destinations by number, set "leg" to a destination's number ONLY when the list clearly ties the item to that destination: it sits under a heading naming it (e.g. "Costa Rica:" then items), or has a note next to it (e.g. "snorkel (for CR)", "suit - wedding in Lisbon"). Everything else, including anything you're unsure about, gets leg null (it's for the whole trip).
+- Without a LEGS block, "leg" is always null.`;
 
 // Thrown with a user-facing message; `status` is a suggested HTTP status.
 export class ParseError extends Error {
@@ -153,7 +161,12 @@ export function parseItemArray(raw: string): unknown[] | null {
   return null;
 }
 
-export async function parsePackingList(text: string): Promise<ParsedItem[]> {
+// `legs` names the trip's destinations in order, so items the list clearly
+// groups under one can be tagged to it.
+export async function parsePackingList(
+  text: string,
+  opts: { legs?: string[] } = {},
+): Promise<ParsedItem[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new ParseError("The parser isn't configured yet (missing API key).");
@@ -170,7 +183,15 @@ export async function parsePackingList(text: string): Promise<ParsedItem[]> {
       model: MODEL,
       max_tokens: MAX_TOKENS,
       system: PARSE_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: text }],
+      messages: [
+        {
+          role: "user",
+          content:
+            opts.legs && opts.legs.length > 1
+              ? `LEGS\n${opts.legs.map((l, i) => `${i}: ${l}`).join("\n")}\n\nLIST\n${text}`
+              : text,
+        },
+      ],
     });
 
     const textBlock = message.content.find(
@@ -210,6 +231,7 @@ export type ResolvedItem = {
   category: string;
   quantity: number;
   canonical_name: string;
+  leg: number | null; // index into the legs passed to parsePackingList
 };
 
 export function resolveParsedItem(item: ParsedItem): ResolvedItem | null {
@@ -224,7 +246,8 @@ export function resolveParsedItem(item: ParsedItem): ResolvedItem | null {
       ? Math.round(item.quantity)
       : 1;
   const canonical_name = normaliseCanonical(item.canonical_name || name);
-  return { name, category, quantity, canonical_name };
+  const leg = typeof item.leg === "number" && Number.isInteger(item.leg) ? item.leg : null;
+  return { name, category, quantity, canonical_name, leg };
 }
 
 export function normaliseCanonical(value: string): string {
