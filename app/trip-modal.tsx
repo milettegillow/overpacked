@@ -16,7 +16,7 @@ import {
   type TripDetail,
   type TripMode,
 } from "@/lib/trip-fields";
-import { CheckIcon, PlusIcon, XIcon } from "./ui/icons";
+import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "./ui/icons";
 import { LegTag } from "./ui/leg-tag";
 import { inputClass, pillClass } from "./ui/styles";
 
@@ -46,6 +46,9 @@ export function TripModal({
   const [items, setItems] = useState<Item[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Reset on close: the modal unmounts.
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<StatusFilter>("all");
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Load the trip.
@@ -134,8 +137,18 @@ export function TripModal({
     patchItem(item.id, { leg_id: next });
   }
 
-  const packed = items.filter((i) => i.status !== "wished");
-  const wished = items.filter((i) => i.status === "wished");
+  // Search applies everywhere; status filters only exist in review mode.
+  const needle = query.trim().toLowerCase();
+  const searched = needle ? items.filter((i) => i.name.toLowerCase().includes(needle)) : items;
+  const activeFilter = mode === "review" ? filter : "all";
+  const shown = searched.filter((i) => FILTERS[activeFilter].test(i.status));
+  const shownPacked = shown.filter((i) => i.status !== "wished");
+  const shownWished = mode === "review" ? shown.filter((i) => i.status === "wished") : [];
+  const counts = Object.fromEntries(
+    FILTER_ORDER.map((f) => [f, searched.filter((i) => FILTERS[f].test(i.status)).length]),
+  ) as Record<StatusFilter, number>;
+  const filtering = needle !== "" || activeFilter !== "all";
+  const nothingMatches = filtering && shownPacked.length + shownWished.length === 0;
 
   return (
     <div
@@ -188,8 +201,17 @@ export function TripModal({
                   />
                 )}
 
+                <div className="flex flex-col gap-3">
+                  <SearchInput value={query} onChange={setQuery} />
+                  {mode === "review" && (
+                    <FilterPills value={filter} counts={counts} onChange={setFilter} />
+                  )}
+                </div>
+
+                {nothingMatches && <p>Nothing matches</p>}
+
                 <PackedList
-                  items={packed}
+                  items={shownPacked}
                   legs={legs}
                   mode={mode}
                   onStatus={(item, status) => patchItem(item.id, { status })}
@@ -213,9 +235,9 @@ export function TripModal({
                     Wish I&apos;d brought
                   </span>
                 </div>
-                {wished.length > 0 && (
+                {shownWished.length > 0 && (
                   <ul className="flex flex-col gap-2">
-                    {wished.map((item) => (
+                    {shownWished.map((item) => (
                       <li
                         key={item.id}
                         className="flex items-center gap-3 rounded-row bg-raised py-2 pr-2 pl-4"
@@ -251,6 +273,106 @@ export function TripModal({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+type StatusFilter = "all" | "glad" | "unneeded" | "neutral" | "wished";
+
+const FILTER_ORDER: StatusFilter[] = ["all", "glad", "unneeded", "neutral", "wished"];
+
+// Pill styles reuse the status colours; All and Not marked are neutral cream.
+const FILTERS: Record<
+  StatusFilter,
+  { label: string; test: (s: ItemStatus) => boolean; on: string; off: string }
+> = {
+  all: {
+    label: "All",
+    test: () => true,
+    on: "border-foreground bg-foreground text-background",
+    off: "border-foreground text-foreground",
+  },
+  glad: {
+    label: "So glad",
+    test: (s) => s === "glad",
+    on: "border-glad bg-glad text-glad-foreground",
+    off: "border-glad text-glad-foreground",
+  },
+  unneeded: {
+    label: "Didn't need",
+    test: (s) => s === "unneeded",
+    on: "border-unneeded bg-unneeded text-unneeded-foreground",
+    off: "border-unneeded text-unneeded-foreground",
+  },
+  neutral: {
+    label: "Not marked",
+    test: (s) => s === "neutral",
+    on: "border-foreground bg-foreground text-background",
+    off: "border-foreground text-foreground",
+  },
+  wished: {
+    label: "Wish I'd brought",
+    test: (s) => s === "wished",
+    on: "border-wished bg-wished text-wished-foreground",
+    off: "border-wished text-wished-foreground",
+  },
+};
+
+function SearchInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative">
+      <SearchIcon
+        size={18}
+        className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-moss"
+      />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search your list"
+        aria-label="Search your list"
+        className={`${inputClass} pr-11 pl-11 [&::-webkit-search-cancel-button]:hidden`}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label="Clear search"
+          className="absolute top-1/2 right-2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-moss hover:text-foreground"
+        >
+          <XIcon size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FilterPills({
+  value,
+  counts,
+  onChange,
+}: {
+  value: StatusFilter;
+  counts: Record<StatusFilter, number>;
+  onChange: (f: StatusFilter) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
+      {FILTER_ORDER.map((f) => {
+        const active = value === f;
+        const style = FILTERS[f];
+        return (
+          <button
+            key={f}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(f)}
+            className={`whitespace-nowrap rounded-full border px-3 py-0.5 ${active ? style.on : `bg-transparent ${style.off}`}`}
+          >
+            {style.label} {counts[f]}
+          </button>
+        );
+      })}
     </div>
   );
 }
