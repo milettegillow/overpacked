@@ -1,5 +1,8 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Bricolage_Grotesque } from "next/font/google";
+import { ClerkProvider, Show, SignOutButton } from "@clerk/nextjs";
+import { clerkAppearance } from "./clerk-appearance";
 import { FairyLights } from "./fairy-lights";
 import "./globals.css";
 
@@ -16,22 +19,37 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en-GB" className={`${bricolage.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col font-sans">
-        <header className="pt-5 pb-4">
-          <div className="mx-auto w-full max-w-[640px] px-4">
-            <span className="text-xl font-medium tracking-tight">
-              overpacked
-            </span>
-          </div>
-          <div className="mt-4 px-4">
-            <FairyLights />
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-[640px] flex-1 px-4 pb-12">
-          {children}
-        </main>
-      </body>
-    </html>
+    <ClerkProvider
+      signInUrl="/login"
+      afterSignOutUrl="/login"
+      appearance={clerkAppearance}
+    >
+      <html lang="en-GB" className={`${bricolage.variable} h-full antialiased`}>
+        <body className="flex min-h-full flex-col font-sans">
+          <header className="pt-5 pb-4">
+            <div className="mx-auto flex w-full max-w-[640px] items-center justify-between px-4">
+              <span className="text-xl font-medium tracking-tight">
+                overpacked
+              </span>
+              <Suspense>
+                <Show when="signed-in">
+                  <SignOutButton>
+                    <button type="button" className="text-foreground">
+                      Log out
+                    </button>
+                  </SignOutButton>
+                </Show>
+              </Suspense>
+            </div>
+            <div className="mt-4 px-4">
+              <FairyLights />
+            </div>
+          </header>
+          <main className="mx-auto w-full max-w-[640px] flex-1 px-4 pb-12">
+            {children}
+          </main>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { CLOTHING_CATEGORIES, NON_CLOTHING_CATEGORIES } from "./categories";
+import { stripDashes } from "./text";
 
 // Server-only: turns a pasted packing list into structured items via Claude.
 
@@ -144,19 +145,6 @@ export function parseItemArray(raw: string): unknown[] | null {
   return null;
 }
 
-// Belt and braces: replace any em or en dash the model slipped in with a
-// spaced hyphen.
-function stripDashes(value: unknown): unknown {
-  if (typeof value === "string") return value.replace(/\s*[—–]\s*/g, " - ");
-  if (Array.isArray(value)) return value.map(stripDashes);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, stripDashes(v)]),
-    );
-  }
-  return value;
-}
-
 export async function parsePackingList(text: string): Promise<ParsedItem[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -203,6 +191,6 @@ export async function parsePackingList(text: string): Promise<ParsedItem[]> {
   // Assign a stable, server-generated id to each item.
   return parsed.map((item) => ({
     id: randomUUID(),
-    ...(stripDashes(item) as Omit<ParsedItem, "id">),
+    ...stripDashes(item as Omit<ParsedItem, "id">),
   }));
 }
