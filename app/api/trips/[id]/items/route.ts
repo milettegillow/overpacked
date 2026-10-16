@@ -9,7 +9,6 @@ import {
   normaliseCanonical,
   parsePackingList,
   ParseError,
-  resolveParsedItem,
   type ResolvedItem,
 } from "@/lib/parse";
 import { getLegsForTrip, isUuid, ownsTrip } from "@/lib/trips";
@@ -93,9 +92,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/trips/[id]/
 
     let resolved: ResolvedItem[];
     try {
-      resolved = (await parsePackingList(body.text))
-        .map(resolveParsedItem)
-        .filter((i): i is ResolvedItem => i != null);
+      resolved = await parsePackingList(body.text);
     } catch (err) {
       if (err instanceof ParseError) return fail(err.message, err.status);
       throw err;

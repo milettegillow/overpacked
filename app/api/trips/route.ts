@@ -7,7 +7,7 @@ import { isIsoDate, needsDatesForForecast, todayIso } from "@/lib/dates";
 import { errorResponse, fail } from "@/lib/http";
 import { insertItems } from "@/lib/items";
 import { LegInputSchema, prepareNewLeg } from "@/lib/legs";
-import { parsePackingList, resolveParsedItem, type ResolvedItem } from "@/lib/parse";
+import { parsePackingList, type ResolvedItem } from "@/lib/parse";
 
 const SaveTripSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -54,11 +54,7 @@ export async function POST(request: Request) {
     const parsing: Promise<ResolvedItem[] | null> = listText
       ? parsePackingList(listText, {
           legs: trip.legs.map((l) => `${l.city}, ${l.country}`),
-        })
-          .then((parsed) =>
-            parsed.map(resolveParsedItem).filter((i): i is ResolvedItem => i != null),
-          )
-          .catch((err) => {
+        }).catch((err) => {
             console.error("Parsing the pasted list failed", err);
             return null;
           })

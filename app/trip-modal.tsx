@@ -18,6 +18,7 @@ import {
   type TripMode,
 } from "@/lib/trip-fields";
 import { TripEditForm } from "./trip-edit-form";
+import { AutoGrowTextarea } from "./ui/auto-grow-textarea";
 import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "./ui/icons";
 import { LegTag } from "./ui/leg-tag";
 import { inputClass, pillClass } from "./ui/styles";
@@ -147,18 +148,18 @@ export function TripModal({
     }
   }
 
-  async function addItems(body: Record<string, unknown>): Promise<boolean> {
-    setError(null);
+  // Adds items and shows them straight away. Returns the error message on
+  // failure (null on success) so each control can show it next to itself.
+  async function addItems(body: Record<string, unknown>): Promise<string | null> {
     try {
       const { items: added } = await requestJson<{ items: Item[] }>(
         `/api/trips/${tripId}/items`,
         { body },
       );
       setItems((list) => [...list, ...added]);
-      return true;
+      return null;
     } catch (err) {
-      setError((err as Error).message);
-      return false;
+      return (err as Error).message;
     }
   }
 
@@ -251,15 +252,18 @@ export function TripModal({
                     legs={legs}
                     viewLegId={viewLeg?.id ?? null}
                     items={items}
-                    onAdd={(s, legId) =>
-                      addItems({
+                    onAdd={async (s, legId) => {
+                      setError(null);
+                      const failure = await addItems({
                         mode: "suggestion",
                         name: s.name,
                         category: s.category,
                         canonical_name: s.canonical_name,
                         leg_id: multi ? legId : null,
-                      })
-                    }
+                      });
+                      if (failure) setError(errorMessage(failure, "Couldn't add that - try again"));
+                      return failure == null;
+                    }}
                   />
                 )}
 
@@ -286,6 +290,7 @@ export function TripModal({
             {items.length > 0 && (
               <AddInput
                 label="Add item"
+                failMessage="Couldn't add that item - try again"
                 onSubmit={(text) => addItems({ mode: "parse", text })}
               />
             )}
@@ -320,6 +325,7 @@ export function TripModal({
                 )}
                 <AddInput
                   label="Add something you wished you'd brought"
+                  failMessage="Couldn't add that - try again"
                   onSubmit={(text) => addItems({ mode: "parse", text, status: "wished" })}
                 />
               </section>
@@ -510,66 +516,102 @@ function TripHeader({
   );
 }
 
+// The real error while developing; a plain one for everyone else.
+function errorMessage(error: string, fallback: string): string {
+  return process.env.NODE_ENV === "development" ? error : fallback;
+}
+
+function InlineError({ message }: { message: string | null }) {
+  return message ? (
+    <p role="alert" className="text-unneeded-foreground">
+      {message}
+    </p>
+  ) : null;
+}
+
 function EmptyList({
   trip,
   onAdd,
 }: {
   trip: TripDetail;
-  onAdd: (body: Record<string, unknown>) => Promise<boolean>;
+  onAdd: (body: Record<string, unknown>) => Promise<string | null>;
 }) {
   // A list pasted on the new trip page arrives pre-filled.
   const [text, setText] = useState(() => readListText(trip.id) ?? "");
-  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const busy = adding || copying;
 
+  // On success the itemised list replaces this whole block; on failure the
+  // pasted text stays put.
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    const ok = await onAdd({ mode: "parse", text });
-    if (ok) clearListText(trip.id);
-    else setBusy(false);
+    if (busy || !text.trim()) return;
+    setListError(null);
+    setCopyError(null);
+    setAdding(true);
+    const failure = await onAdd({ mode: "parse", text });
+    if (failure == null) {
+      clearListText(trip.id);
+    } else {
+      setListError(errorMessage(failure, "Couldn't add your list - try again"));
+      setAdding(false);
+    }
   }
 
   async function copy(from: string) {
-    if (!from) return;
-    setBusy(true);
-    const ok = await onAdd({ mode: "copy", from });
-    if (!ok) setBusy(false);
+    if (!from || busy) return;
+    setListError(null);
+    setCopyError(null);
+    setCopying(true);
+    const failure = await onAdd({ mode: "copy", from });
+    if (failure != null) {
+      setCopyError(errorMessage(failure, "Couldn't copy that trip - try again"));
+      setCopying(false);
+    }
   }
 
   return (
     <div className="flex flex-col gap-4">
       <form onSubmit={submit} className="flex flex-col gap-3">
-        <textarea
+        <AutoGrowTextarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste your packing list"
           aria-label="Packing list"
           rows={6}
           required
-          className={`${inputClass} resize-y`}
+          disabled={adding}
+          className={`${inputClass} resize-none overflow-hidden disabled:opacity-60`}
         />
+        <InlineError message={listError} />
         <div>
           <button type="submit" disabled={busy || !text.trim()} className={pillClass}>
-            {busy ? "Adding…" : "Add list"}
+            {adding ? "Adding…" : "Add list"}
           </button>
         </div>
       </form>
 
       {trip.other_trips.length > 0 && (
-        <select
-          aria-label="Copy from a previous trip"
-          value=""
-          disabled={busy}
-          onChange={(e) => copy(e.target.value)}
-          className={inputClass}
-        >
-          <option value="">Copy from a previous trip</option>
-          {trip.other_trips.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.title}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-col gap-3">
+          <select
+            aria-label="Copy from a previous trip"
+            value=""
+            disabled={busy}
+            onChange={(e) => copy(e.target.value)}
+            className={`${inputClass} disabled:opacity-60`}
+          >
+            <option value="">{copying ? "Copying…" : "Copy from a previous trip"}</option>
+            {trip.other_trips.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+          <InlineError message={copyError} />
+        </div>
       )}
     </div>
   );
@@ -730,40 +772,50 @@ function RemoveButton({ name, onRemove }: { name: string; onRemove: () => void }
 
 function AddInput({
   label,
+  failMessage,
   onSubmit,
 }: {
   label: string;
-  onSubmit: (text: string) => Promise<boolean>;
+  failMessage: string;
+  onSubmit: (text: string) => Promise<string | null>;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // Cleared on success; kept on failure so nothing typed is lost.
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!text.trim()) return;
+    if (busy || !text.trim()) return;
+    setError(null);
     setBusy(true);
-    if (await onSubmit(text)) setText("");
+    const failure = await onSubmit(text);
+    if (failure == null) setText("");
+    else setError(errorMessage(failure, failMessage));
     setBusy(false);
   }
 
   return (
-    <form onSubmit={submit} className="flex gap-2">
-      <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={label}
-        aria-label={label}
-        disabled={busy}
-        className={inputClass}
-      />
-      <button
-        type="submit"
-        disabled={busy || !text.trim()}
-        className="shrink-0 rounded-full bg-primary px-5 font-medium text-primary-foreground disabled:opacity-60"
-      >
-        {busy ? "Adding…" : "Add"}
-      </button>
-    </form>
+    <div className="flex flex-col gap-2">
+      <form onSubmit={submit} className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={label}
+          aria-label={label}
+          disabled={busy}
+          className={`${inputClass} disabled:opacity-60`}
+        />
+        <button
+          type="submit"
+          disabled={busy || !text.trim()}
+          className="shrink-0 rounded-full bg-primary px-5 font-medium text-primary-foreground disabled:opacity-60"
+        >
+          {busy ? "Adding…" : "Add"}
+        </button>
+      </form>
+      <InlineError message={error} />
+    </div>
   );
 }
 
