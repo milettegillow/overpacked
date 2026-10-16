@@ -44,9 +44,27 @@ export const clerkAppearance = {
       border: "none",
       boxShadow: "none",
       padding: 0,
+      // Our page heading replaces Clerk's on the first step only; later steps
+      // (check your email, link opened, link expired) keep theirs.
+      "&.cl-signIn-start .cl-header, &.cl-signUp-start .cl-header": { display: "none" },
+      // Link-landing screens add a generic "You may close this tab" line that
+      // repeats (or contradicts) the title and subtitle above it.
+      "&.cl-signIn-emailLinkStatus .cl-verificationLinkStatusText, &.cl-signUp-emailLinkStatus .cl-verificationLinkStatusText":
+        { display: "none" },
     },
-    // Our own heading replaces Clerk's title and subtitle.
-    header: { display: "none" },
+    headerTitle: { fontSize: "24px", fontWeight: 500, color: CREAM },
+    headerSubtitle: { fontSize: "16px", color: CREAM },
+    formHeaderTitle: { fontSize: "16px", fontWeight: 500, color: CREAM },
+    formHeaderSubtitle: { fontSize: "16px", color: CREAM },
+    identityPreviewText: { fontSize: "16px", color: CREAM },
+    identityPreviewEditButton: { color: MOSS },
+    // Stays readable during the resend countdown; the "(59)" shows it's waiting.
+    formResendCodeLink: { fontSize: "16px", color: MOSS, "&:disabled": { opacity: 1 } },
+    verificationLinkStatusIcon: { color: AMBER },
+    verificationLinkStatusText: { fontSize: "16px", color: CREAM },
+    footerActionText: { fontSize: "16px", color: CREAM },
+    footerActionLink: { fontSize: "16px", color: MOSS },
+    spinner: { color: AMBER },
     formFieldLabel: { color: CREAM, fontSize: "16px", fontWeight: 400 },
     formFieldInput: {
       backgroundColor: RAISED,
@@ -88,8 +106,40 @@ export const clerkAppearance = {
   },
 };
 
-// Plain words for the one form we show.
+// Plain words for the sign-in flow. Sign-in and sign-up share the email-link
+// screens' wording since it's one combined flow.
+// Clerk doesn't fill in {{identifier}} on this step, but shows the address on
+// its own line straight underneath.
+const SENT = "We've sent you a link. If it's not in your inbox, check your junk folder.";
+const CHECK_EMAIL = {
+  title: "Check your email",
+  subtitle: SENT,
+  // The waiting step shows formSubtitle under the title.
+  formSubtitle: SENT,
+  resendButton: "Send it again",
+};
+const LOGGED_IN = "You're logged in";
+const OTHER_TAB = "Head back to your other tab, or close this one";
+const EXPIRED = { title: "That link's expired", subtitle: "Send a new one below" };
+
 export const clerkLocalization = {
   formFieldLabel__emailAddress: "Email",
   formButtonPrimary: "Send link",
+  formFieldError__verificationLinkExpired: "That link's expired - send a new one below",
+  signIn: {
+    emailLink: {
+      ...CHECK_EMAIL,
+      verified: { title: LOGGED_IN },
+      verifiedSwitchTab: { title: LOGGED_IN, subtitle: OTHER_TAB, subtitleNewTab: OTHER_TAB },
+      expired: EXPIRED,
+      failed: EXPIRED,
+    },
+  },
+  signUp: {
+    emailLink: {
+      ...CHECK_EMAIL,
+      verified: { title: LOGGED_IN, subtitle: OTHER_TAB },
+      verifiedSwitchTab: { titleNewTab: LOGGED_IN, subtitle: OTHER_TAB, subtitleNewTab: OTHER_TAB },
+    },
+  },
 };

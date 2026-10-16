@@ -10,7 +10,15 @@ export default function LoginPage() {
       </h1>
       <div className="w-full">
         <Suspense>
-          <SignIn routing="path" path="/login" signUpUrl="/login" withSignUp />
+          {/* After the link is opened, this tab notices and continues to the app. */}
+          <SignIn
+            routing="path"
+            path="/login"
+            signUpUrl="/login"
+            withSignUp
+            fallbackRedirectUrl="/"
+            signUpFallbackRedirectUrl="/"
+          />
         </Suspense>
       </div>
     </div>
