@@ -6,7 +6,7 @@ import { ALL_CATEGORIES } from "@/lib/categories";
 import { clearListText, localToday, readListText, requestJson } from "@/lib/client";
 import {
   flagEmoji,
-  getTripMode,
+  getLegMode,
   tripSummaryLine,
   type Item,
   type ItemStatus,
@@ -36,15 +36,21 @@ function categoryRank(category: string): number {
 
 export function TripModal({
   tripId,
+  legId,
+  onSelectLeg,
   onClose,
   onDeleted,
 }: {
   tripId: string;
+  // The leg being viewed on a multi-leg trip; null for the whole trip.
+  legId: string | null;
+  onSelectLeg: (legId: string | null) => void;
   onClose: () => void;
   onDeleted: () => void;
 }) {
   const [trip, setTrip] = useState<TripDetail | null>(null);
-  const [mode, setMode] = useState<TripMode>("review");
+  // The browser's date, read once the trip loads (never during render).
+  const [today, setToday] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
@@ -62,7 +68,7 @@ export function TripModal({
       .then((detail) => {
         if (cancelled) return;
         setTrip(detail);
-        setMode(getTripMode(detail, localToday()));
+        setToday(localToday());
         setItems(detail.items);
       })
       .catch((err: Error) => {
@@ -94,6 +100,27 @@ export function TripModal({
 
   const legs = trip?.legs ?? [];
   const multi = legs.length > 1;
+
+  // Leg view: this leg's items (plus those for all legs), its weather and its
+  // own planning or review mode. Unknown or removed legs fall back to the
+  // whole trip.
+  const viewLeg = multi ? (legs.find((l) => l.id === legId) ?? null) : null;
+  const legModes = new Map<string, TripMode>(
+    trip && today ? legs.map((l) => [l.id, getLegMode(l, trip.created_at, today)]) : [],
+  );
+  const mode: TripMode = viewLeg
+    ? (legModes.get(viewLeg.id) ?? "review")
+    : legs.length > 0 && legs.every((l) => legModes.get(l.id) === "planning")
+      ? "planning"
+      : "review";
+  // Suggestions: this leg if it's being planned; on the whole trip, every leg
+  // that is.
+  const suggestLegs = (viewLeg ? [viewLeg] : legs).filter(
+    (l) => legModes.get(l.id) === "planning",
+  );
+  const viewItems = viewLeg
+    ? items.filter((i) => i.leg_id == null || i.leg_id === viewLeg.id)
+    : items;
 
   // Optimistic update with rollback.
   async function patchItem(id: string, patch: Partial<Pick<Item, "status" | "leg_id">>) {
@@ -143,7 +170,9 @@ export function TripModal({
 
   // Search applies everywhere; status filters only exist in review mode.
   const needle = query.trim().toLowerCase();
-  const searched = needle ? items.filter((i) => i.name.toLowerCase().includes(needle)) : items;
+  const searched = needle
+    ? viewItems.filter((i) => i.name.toLowerCase().includes(needle))
+    : viewItems;
   const activeFilter = mode === "review" ? filter : "all";
   const shown = searched.filter((i) => FILTERS[activeFilter].test(i.status));
   const shownPacked = shown.filter((i) => i.status !== "wished");
@@ -202,23 +231,25 @@ export function TripModal({
                   // removed legs leave their items tagged to all legs.
                   setTrip(updated);
                   setItems(updated.items);
-                  setMode(getTripMode(updated, localToday()));
+                  setToday(localToday());
                   setEditing(false);
                   router.refresh();
                 }}
               />
             ) : (
-              <TripHeader trip={trip} />
+              <TripHeader trip={trip} viewLeg={viewLeg} onSelectLeg={onSelectLeg} />
             )}
 
             {items.length === 0 ? (
               <EmptyList trip={trip} onAdd={addItems} />
             ) : (
               <>
-                {mode === "planning" && (
+                {today && suggestLegs.length > 0 && (
                   <Suggestions
+                    key={viewLeg?.id ?? "whole"}
                     tripId={tripId}
                     legs={legs}
+                    viewLegId={viewLeg?.id ?? null}
                     items={items}
                     onAdd={(s, legId) =>
                       addItems({
@@ -416,21 +447,57 @@ function showLegTags(trip: TripDetail): boolean {
   return city !== trip.title.trim().toLowerCase();
 }
 
-function TripHeader({ trip }: { trip: TripDetail }) {
+function TripHeader({
+  trip,
+  viewLeg,
+  onSelectLeg,
+}: {
+  trip: TripDetail;
+  viewLeg: Leg | null;
+  onSelectLeg: (legId: string | null) => void;
+}) {
+  const multi = trip.legs.length > 1;
+  const weatherLegs = viewLeg ? [viewLeg] : trip.legs;
   return (
     <header className="flex flex-col gap-3 pr-32">
       <h2 id="trip-modal-title" className="text-2xl font-medium tracking-tight">
         {trip.title}
       </h2>
-      {showLegTags(trip) && (
-        <div className="flex flex-wrap gap-2">
+      {multi ? (
+        // A tag per leg plus "Whole trip": the current view is filled.
+        <div className="flex flex-wrap gap-2" role="group" aria-label="View">
           {trip.legs.map((leg) => (
-            <LegTag key={leg.id} leg={leg} />
+            <button
+              key={leg.id}
+              type="button"
+              aria-pressed={viewLeg?.id === leg.id}
+              onClick={() => onSelectLeg(leg.id)}
+            >
+              <LegTag leg={leg} filled={viewLeg?.id === leg.id} />
+            </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={viewLeg == null}
+            onClick={() => onSelectLeg(null)}
+            className={`whitespace-nowrap rounded-full border border-foreground px-3 py-0.5 ${
+              viewLeg == null ? "bg-foreground text-background" : "text-foreground"
+            }`}
+          >
+            Whole trip
+          </button>
         </div>
+      ) : (
+        showLegTags(trip) && (
+          <div className="flex flex-wrap gap-2">
+            {trip.legs.map((leg) => (
+              <LegTag key={leg.id} leg={leg} />
+            ))}
+          </div>
+        )
       )}
       <div className="flex flex-col">
-        {trip.legs.map((leg) => {
+        {weatherLegs.map((leg) => {
           const line = tripSummaryLine(leg);
           return line ? (
             <p key={leg.id} className="text-moss">
@@ -703,11 +770,13 @@ function AddInput({
 function Suggestions({
   tripId,
   legs,
+  viewLegId,
   items,
   onAdd,
 }: {
   tripId: string;
   legs: Leg[];
+  viewLegId: string | null;
   items: Item[];
   onAdd: (s: Suggestion, legId: string) => Promise<boolean>;
 }) {
@@ -726,13 +795,16 @@ function Suggestions({
 
   const load = useCallback(
     (signal: AbortSignal) =>
-      fetch(`/api/trips/${tripId}/suggestions`, { signal })
+      fetch(
+        `/api/trips/${tripId}/suggestions${viewLegId ? `?leg=${encodeURIComponent(viewLegId)}` : ""}`,
+        { signal },
+      )
         .then((res) => (res.ok ? res.json() : { legs: [] }))
         .then((data: { legs: LegSuggestions[] }) => setResults(data.legs))
         .catch(() => {
           // suggestions are a nice-to-have; keep what we had
         }),
-    [tripId],
+    [tripId, viewLegId],
   );
 
   useEffect(() => {
@@ -744,7 +816,8 @@ function Suggestions({
     };
   }, [signature, load]);
 
-  const multi = legs.length > 1;
+  // Group under leg tags only on a multi-leg trip's whole-trip view.
+  const multi = legs.length > 1 && viewLegId == null;
   const withContent = results.filter((r) => r.forgotten.length > 0 || r.not_needed.length > 0);
   if (withContent.length === 0) return null;
 

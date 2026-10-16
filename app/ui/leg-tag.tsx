@@ -1,13 +1,16 @@
 import { flagEmoji, vibeColour } from "@/lib/trip-fields";
 
-// Outlined location pill: flag + city, coloured by vibe. Outlined so it never
-// clashes with the filled status pills.
+// Location pill: flag + city, coloured by vibe. Outlined by default so it
+// never clashes with the filled status pills; `filled` marks the leg being
+// viewed, and `selected` an active filter.
 export function LegTag({
   leg,
   selected = false,
+  filled = false,
 }: {
   leg: { city: string | null; country_code: string | null; vibe: string | null };
   selected?: boolean;
+  filled?: boolean;
 }) {
   const colour = vibeColour(leg.vibe);
   const flag = flagEmoji(leg.country_code);
@@ -16,8 +19,8 @@ export function LegTag({
       className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-0.5"
       style={{
         borderColor: colour,
-        color: colour,
-        backgroundColor: selected ? `${colour}26` : "transparent",
+        color: filled ? "var(--background)" : colour,
+        backgroundColor: filled ? colour : selected ? `${colour}26` : "transparent",
       }}
     >
       {flag && <span aria-hidden="true">{flag}</span>}

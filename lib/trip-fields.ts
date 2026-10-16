@@ -169,19 +169,18 @@ export function tripDateLine(legs: Leg[]): string {
 
 export type TripMode = "planning" | "review";
 
-// Planning for future trips, review for past and ongoing ones, decided by the
-// first leg: its start date if it has one, otherwise its month and year
-// (falling back to the year the trip was added).
-export function getTripMode(
-  trip: { created_at: string; legs: Pick<Leg, "start_date" | "month" | "year">[] },
+// Planning for future legs, review for past and ongoing ones: by the leg's
+// start date if it has one, otherwise its month and year (falling back to the
+// year the trip was added).
+export function getLegMode(
+  leg: Pick<Leg, "start_date" | "month" | "year">,
+  tripCreatedAt: string,
   today: string = todayIso(),
 ): TripMode {
-  const first = trip.legs[0];
-  if (!first) return "review";
-  if (first.start_date) return first.start_date > today ? "planning" : "review";
-  if (first.month == null) return "review";
-  const year = first.year ?? Number(trip.created_at.slice(0, 4));
-  const tripMonth = year * 12 + first.month;
+  if (leg.start_date) return leg.start_date > today ? "planning" : "review";
+  if (leg.month == null) return "review";
+  const year = leg.year ?? Number(tripCreatedAt.slice(0, 4));
+  const legMonth = year * 12 + leg.month;
   const thisMonth = Number(today.slice(0, 4)) * 12 + Number(today.slice(5, 7));
-  return tripMonth > thisMonth ? "planning" : "review";
+  return legMonth > thisMonth ? "planning" : "review";
 }
