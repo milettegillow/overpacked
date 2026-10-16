@@ -1,14 +1,20 @@
+import { NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 const isPublicRoute = createRouteMatcher(["/login(.*)"]);
 
-// auth.protect() sends signed-out visitors to signInUrl. Without these the
-// middleware falls back to Clerk's hosted sign-in page (ClerkProvider's props
-// only apply in the browser). One combined page handles sign-up too.
+// /login and /login/verify are public. auth.protect() sends signed-out
+// visitors to signInUrl; without it the middleware falls back to Clerk's
+// hosted sign-in page (ClerkProvider's props only apply in the browser).
 export default clerkMiddleware(
   async (auth, req) => {
     if (!isPublicRoute(req)) {
       await auth.protect();
+      return;
+    }
+    // Already signed in: skip the login page (the verify page stays reachable).
+    if (req.nextUrl.pathname === "/login" && (await auth()).userId) {
+      return NextResponse.redirect(new URL("/", req.url));
     }
   },
   { signInUrl: "/login", signUpUrl: "/login" },

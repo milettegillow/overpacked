@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { SignIn } from "@clerk/nextjs";
+import { LoginFlow } from "./login-flow";
 
 // One combined flow: new and returning people just enter their email.
 export default function LoginPage() {
@@ -10,15 +10,7 @@ export default function LoginPage() {
       </h1>
       <div className="w-full">
         <Suspense>
-          {/* After the link is opened, this tab notices and continues to the app. */}
-          <SignIn
-            routing="path"
-            path="/login"
-            signUpUrl="/login"
-            withSignUp
-            fallbackRedirectUrl="/"
-            signUpFallbackRedirectUrl="/"
-          />
+          <LoginFlow />
         </Suspense>
       </div>
     </div>
