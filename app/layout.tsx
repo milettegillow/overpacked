@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Bricolage_Grotesque } from "next/font/google";
 import { ClerkProvider, Show, SignOutButton } from "@clerk/nextjs";
-import { clerkAppearance } from "./clerk-appearance";
+import { clerkAppearance, clerkLocalization } from "./clerk-appearance";
 import { FairyLights } from "./fairy-lights";
 import "./globals.css";
 
@@ -22,8 +22,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <ClerkProvider
       signInUrl="/login"
+      signUpUrl="/login"
       afterSignOutUrl="/login"
       appearance={clerkAppearance}
+      localization={clerkLocalization}
     >
       <html lang="en-GB" className={`${bricolage.variable} h-full antialiased`}>
         <body className="flex min-h-full flex-col font-sans">

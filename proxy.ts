@@ -2,11 +2,17 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 const isPublicRoute = createRouteMatcher(["/login(.*)"]);
 
-export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
-});
+// auth.protect() sends signed-out visitors to signInUrl. Without these the
+// middleware falls back to Clerk's hosted sign-in page (ClerkProvider's props
+// only apply in the browser). One combined page handles sign-up too.
+export default clerkMiddleware(
+  async (auth, req) => {
+    if (!isPublicRoute(req)) {
+      await auth.protect();
+    }
+  },
+  { signInUrl: "/login", signUpUrl: "/login" },
+);
 
 export const config = {
   matcher: [
